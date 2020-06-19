@@ -37,19 +37,21 @@
 (defn ->mvn-coords [module]
   (symbol (name 'juxt) module))
 
-(def module-qualifiers
-  {"crux-core" :beta
-   "crux-rocksdb" :beta})
+(defn module-qualifier [module-dir]
+  (let [deps-edn (io/file module-dir "deps.edn")]
+    (when (.exists deps-edn)
+      (let [deps (read-string (slurp deps-edn))]
+        (when (contains? deps :crux/module-qualifier)
+          {:qualifier (:crux/module-qualifier deps)})))))
 
-(defn ->mvn-version [module]
-  (if-let [qualifier (get module-qualifiers module)]
+(defn ->mvn-version [qualifier]
+  (if qualifier
     (let [{:keys [prefix suffix]} git-version]
       (str prefix (when qualifier (str "-" (name qualifier))) suffix))))
 
 (defn- sub-projects [selection]
   (cond-> (.listFiles (io/file "."))
-    :always (->> (into #{} (comp (filter #(.exists (io/file % "deps.edn")))
-                                 (remove #{(io/file "./docs") (io/file "./crux-build")}))))
+    :always (->> (into #{} (filter module-qualifier)))
     selection (->> (into #{} (filter (comp (set selection) #(.getName ^File %)))))))
 
 (defn sh [{:keys [dir]} & args]
@@ -85,9 +87,9 @@
                                 "-proc:none"]}))
 
 (defn sub-javac [& args]
-  (doseq [^File project-dir (sub-projects args)
-          :let [module (.getName project-dir)]]
-    (sh {:dir project-dir}
+  (doseq [^File module-dir (sub-projects args)
+          :let [module (.getName module-dir)]]
+    (sh {:dir module-dir}
         "clojure" "-Sdeps" sdeps
         "-m" "crux.build" "javac" module)))
 
@@ -99,26 +101,25 @@
   (javac module)
   (println "-- jar" module)
 
-  (jar/jar (->mvn-coords module) {:mvn/version (->mvn-version module)}
+  (jar/jar (->mvn-coords module) {:mvn/version (->mvn-version (:qualifier (module-qualifier (io/file "."))))}
            {:out-path (jar-path module)
             :deps (->> (:deps (read-string (slurp "deps.edn")))
                        (into {} (map (fn [[coord {local-root :local/root :as dep}]]
-                                       (if (and local-root
-                                                (and (= (namespace coord) (name 'juxt))
-                                                     (contains? module-qualifiers (name coord))))
-                                         [coord {:mvn/version (->mvn-version (name coord))}]
-                                         [coord dep])))))
+                                       (or (when local-root
+                                             (when-let [{:keys [qualifier]} (module-qualifier (io/file local-root))]
+                                               [coord {:mvn/version (->mvn-version qualifier)}]))
+                                           [coord dep])))))
             :mvn/repos clojars}))
 
 (defn sub-jar [& args]
-  (doseq [^File project-dir (sub-projects args)]
-    (sh {:dir project-dir}
+  (doseq [^File module-dir (sub-projects args)]
+    (sh {:dir module-dir}
         "clojure" "-Sdeps" sdeps
-        "-m" "crux.build" "jar" (.getName project-dir))))
+        "-m" "crux.build" "jar" (.getName module-dir))))
 
 (defn deploy [module]
   (let [coords (->mvn-coords module)
-        version (->mvn-version module)]
+        version (->mvn-version (:qualifier (module-qualifier (io/file "."))))]
     (println "-- deploy" coords version)
 
     (let [artifacts (doto [{:file-path (jar-path module) :extension "jar"}
@@ -129,20 +130,20 @@
 (defn sub-deploy [& args]
   (apply sub-jar args)
 
-  (doseq [^File project-dir (sub-projects args)]
-    (sh {:dir project-dir}
+  (doseq [^File module-dir (sub-projects args)]
+    (sh {:dir module-dir}
         "clojure" "-Sdeps" sdeps
-        "-m" "crux.build" "deploy" (.getName project-dir))))
+        "-m" "crux.build" "deploy" (.getName module-dir))))
 
 (defn sub-test [& args]
   (apply sub-javac args)
 
-  (doseq [^File project-dir (sub-projects args)
-          :let [module (.getName project-dir)]
-          :when (-> (read-string (slurp (io/file project-dir "deps.edn")))
+  (doseq [^File module-dir (sub-projects args)
+          :let [module (.getName module-dir)]
+          :when (-> (read-string (slurp (io/file module-dir "deps.edn")))
                     (get-in [:aliases :test]))]
     (println "-- test" module)
-    (sh {:dir project-dir}
+    (sh {:dir module-dir}
         "clojure" "-A:test")))
 
 (defn -main [op & args]

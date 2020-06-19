@@ -21,4 +21,6 @@
                                                           :sha "f7ef16dc3b8332b0d77bc0274578ad5270fbfedd"},
                                org.clojure/test.check {:mvn/version "0.10.0"}},
 
-                  :main-opts ["-m" "cognitect.test-runner"]}}}
+                  :main-opts ["-m" "cognitect.test-runner"]}}
+
+ :crux/module-qualifier :beta}
