@@ -1,0 +1,6 @@
+{:extra-paths ["dev" "classes"]
+ :deps {juxt/crux-core {:local/root "crux-core/"}}
+
+ :aliases {:build {:extra-paths ["build"]
+                   :extra-deps {badigeon/badigeon {:mvn/version "0.0.13"}}
+                   :main-opts ["-m" "crux.build"]}}}
