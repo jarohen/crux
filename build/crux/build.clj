@@ -85,10 +85,11 @@
                                 "-proc:none"]}))
 
 (defn sub-javac [& args]
-  (doseq [^File project-dir (sub-projects args)]
+  (doseq [^File project-dir (sub-projects args)
+          :let [module (.getName project-dir)]]
     (sh {:dir project-dir}
         "clojure" "-Sdeps" sdeps
-        "-m" "crux.build" "javac")))
+        "-m" "crux.build" "javac" module)))
 
 (defn jar-path [module]
   (format "target/%s.jar" module))
@@ -133,6 +134,17 @@
         "clojure" "-Sdeps" sdeps
         "-m" "crux.build" "deploy" (.getName project-dir))))
 
+(defn sub-test [& args]
+  (apply sub-javac args)
+
+  (doseq [^File project-dir (sub-projects args)
+          :let [module (.getName project-dir)]
+          :when (-> (read-string (slurp (io/file project-dir "deps.edn")))
+                    (get-in [:aliases :test]))]
+    (println "-- test" module)
+    (sh {:dir project-dir}
+        "clojure" "-A:test")))
+
 (defn -main [op & args]
   (try
     (case op
@@ -141,7 +153,8 @@
       "sub-jar" (apply sub-jar args)
       "jar" (apply jar args)
       "deploy" (apply deploy args)
-      "sub-deploy" (apply sub-deploy args))
+      "sub-deploy" (apply sub-deploy args)
+      "sub-test" (apply sub-test args))
 
     (catch Exception e
       (when-not (= "shell failed" (ex-message e))
