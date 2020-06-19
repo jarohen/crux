@@ -1,0 +1,49 @@
+{:paths ["src"]
+ :deps {org.clojure/clojure {:mvn/version "1.10.1"}
+        juxt/crux-core {:local/root "../crux-core"}
+
+        ;; General:
+        org.clojure/test.check {:mvn/version "0.10.0"}
+
+        ;; TPCH Fixture
+        io.airlift.tpch/tpch {:mvn/version "0.10"}}
+
+ :aliases {:test {:extra-deps {juxt/crux-rocksdb {:local/root "../crux-rocksdb"}
+                               juxt/crux-lmdb {:local/root "../crux-lmdb"}
+                               juxt/crux-kafka {:local/root "../crux-kafka"}
+                               juxt/crux-kafka-connect {:local/root "../crux-kafka-connect"}
+                               juxt/crux-kafka-embedded {:local/root "../crux-kafka-embedded"}
+                               juxt/crux-jdbc {:local/root "../crux-jdbc"}
+                               juxt/crux-http-server {:local/root "../crux-http-server"}
+                               juxt/crux-metrics {:local/root "../crux-metrics"}
+                               juxt/crux-rdf {:local/root "../crux-rdf"}
+
+                               ;; JDBC
+                               com.zaxxer/HikariCP {:mvn/version "3.3.1"}
+
+                               com.h2database/h2 {:mvn/version "1.4.199"}
+                               com.opentable.components/otj-pg-embedded {:mvn/version "0.13.1"}
+                               org.xerial/sqlite-jdbc {:mvn/version "3.28.0"}
+                               mysql/mysql-connector-java {:mvn/version "8.0.17"}
+                               com.microsoft.sqlserver/mssql-jdbc {:mvn/version "8.2.2.jre8"}
+
+                               ;; Uncomment to test Oracle, you'll need to locally install the JAR:
+                               ;; com.oracle/ojdbc {:mvn/version "12.2.0.1"}
+
+                               ;; Authenticated HTTP Server/Client Tests
+                               com.nimbusds/nimbus-jose-jwt {:mvn/version "8.2.1"}
+                               net.minidev/json-smart {:mvn/version "2.3"}
+
+                               org.clojure/data.json {:mvn/version "0.2.7"}
+                               org.clojure/data.csv {:mvn/version "1.0.0"}
+
+                               ;; Outer tests:
+                               org.eclipse.rdf4j/rdf4j-repository-sparql {:mvn/version "3.0.0"}
+                               criterium {:mvn/version "0.4.5"}
+
+                               com.cognitect/test-runner {:git/url "https://github.com/cognitect-labs/test-runner.git",
+                                                          :tag "master",
+                                                          :sha "f7ef16dc3b8332b0d77bc0274578ad5270fbfedd"}}
+
+                  :extra-paths ["test" "../docs/src"]
+                  :main-opts ["-m" "cognitect.test-runner"]}}}

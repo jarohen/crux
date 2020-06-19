@@ -51,7 +51,8 @@
 
 (defn- sub-projects [selection]
   (cond-> (.listFiles (io/file "."))
-    :always (->> (into #{} (filter module-qualifier)))
+    :always (->> (into #{} (comp (filter #(.exists (io/file % "deps.edn")))
+                                 (remove #{(io/file "./docs") (io/file "./crux-build")}))))
     selection (->> (into #{} (filter (comp (set selection) #(.getName ^File %)))))))
 
 (defn sh [{:keys [dir]} & args]
@@ -112,7 +113,8 @@
             :mvn/repos clojars}))
 
 (defn sub-jar [& args]
-  (doseq [^File module-dir (sub-projects args)]
+  (doseq [^File module-dir (sub-projects args)
+          :when (module-qualifier module-dir)]
     (sh {:dir module-dir}
         "clojure" "-Sdeps" sdeps
         "-m" "crux.build" "jar" (.getName module-dir))))
@@ -130,7 +132,8 @@
 (defn sub-deploy [& args]
   (apply sub-jar args)
 
-  (doseq [^File module-dir (sub-projects args)]
+  (doseq [^File module-dir (sub-projects args)
+          :when (module-qualifier module-dir)]
     (sh {:dir module-dir}
         "clojure" "-Sdeps" sdeps
         "-m" "crux.build" "deploy" (.getName module-dir))))

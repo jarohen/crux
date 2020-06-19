@@ -1,0 +1,9 @@
+{:paths ["src" "target/classes"]
+ :deps {org.clojure/clojure {:mvn/version "1.10.1"}
+        juxt/crux-core {:local/root "../crux-core"}
+        org.clojure/tools.logging {:mvn/version "0.5.0"}
+        org.apache.kafka/kafka-clients {:mvn/version "2.3.0"}
+        cheshire {:mvn/version "5.9.0"}
+        com.cognitect/transit-clj {:mvn/version "1.0.324"}}
+
+ :crux/module-qualifier :beta}
