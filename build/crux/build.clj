@@ -10,6 +10,9 @@
             [clojure.string :as str])
   (:import (java.io File)))
 
+(def ^:private clojars
+  {:id "clojars", :url "https://repo.clojars.org/"})
+
 (def ^:private sdeps
   (pr-str '{:paths ["../build"]
             :deps {badigeon/badigeon {:mvn/version "0.0.13"}}}))
@@ -35,7 +38,8 @@
   (symbol (name 'juxt) module))
 
 (def module-qualifiers
-  {"crux-core" :beta})
+  {"crux-core" :beta
+   "crux-rocksdb" :beta})
 
 (defn ->mvn-version [module]
   (if-let [qualifier (get module-qualifiers module)]
@@ -96,8 +100,14 @@
 
   (jar/jar (->mvn-coords module) {:mvn/version (->mvn-version module)}
            {:out-path (jar-path module)
-            :mvn/repos '{"clojars" {:url "https://repo.clojars.org/"}}
-            :allow-all-dependencies? true}))
+            :deps (->> (:deps (read-string (slurp "deps.edn")))
+                       (into {} (map (fn [[coord {local-root :local/root :as dep}]]
+                                       (if (and local-root
+                                                (and (= (namespace coord) (name 'juxt))
+                                                     (contains? module-qualifiers (name coord))))
+                                         [coord {:mvn/version (->mvn-version (name coord))}]
+                                         [coord dep])))))
+            :mvn/repos clojars}))
 
 (defn sub-jar [& args]
   (doseq [^File project-dir (sub-projects args)]
@@ -113,9 +123,7 @@
     (let [artifacts (doto [{:file-path (jar-path module) :extension "jar"}
                            {:file-path "pom.xml" :extension "pom"}]
                       (sign/sign))]
-      (deploy/deploy coords version
-                     artifacts
-                     {:id "clojars", :url "https://repo.clojars.org/"}))))
+      (deploy/deploy coords version artifacts clojars))))
 
 (defn sub-deploy [& args]
   (apply sub-jar args)
@@ -136,15 +144,9 @@
       "sub-deploy" (apply sub-deploy args))
 
     (catch Exception e
-      (binding [*out* *err*]
-        (println (format "Failed: '%s', %s%n" (ex-message e) (ex-data e))))
+      (when-not (= "shell failed" (ex-message e))
+        (binding [*out* *err*]
+          (println (format "Failed: '%s', %s%n" (ex-message e) (ex-data e)))))
       (System/exit 1)))
 
   (shutdown-agents))
-
-;; nested make with variables?
-;; bb?
-;; does need to be different JVMs, because JAR
-;; lein sub test certainly needs different JVMs
-;; all in the sa
-;; anyone pulling this down from git will also have to compile the Java side
