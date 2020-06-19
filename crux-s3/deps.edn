@@ -1,0 +1,15 @@
+{:paths ["src" "target/classes"]
+ :deps {org.clojure/clojure {:mvn/version "1.10.1"}
+        org.clojure/tools.logging {:mvn/version "1.0.0"}
+
+        juxt/crux-core {:local/root "../crux-core"}
+        software.amazon.awssdk/s3 {:mvn/version "2.10.61"}}
+
+ :aliases {:test {:extra-deps {juxt/crux-test {:local/root "../crux-test"}
+                               com.cognitect/test-runner {:git/url "https://github.com/cognitect-labs/test-runner.git",
+                                                          :tag "master",
+                                                          :sha "f7ef16dc3b8332b0d77bc0274578ad5270fbfedd"}}
+                  :extra-paths ["test"]
+                  :main-opts ["-m" "cognitect.test-runner"]}}
+
+ :crux/module-qualifier :beta}
