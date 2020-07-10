@@ -1,5 +1,6 @@
 (ns crux.build
-  (:require [badigeon.clean :as clean]
+  (:require [badigeon.classpath :as cp]
+            [badigeon.clean :as clean]
             [badigeon.javac :as javac]
             [badigeon.jar :as jar]
             [badigeon.deploy :as deploy]
@@ -7,7 +8,9 @@
             [clojure.java.io :as io]
             [clojure.java.shell :as shell]
             [clojure.set :as set]
-            [clojure.string :as str])
+            [clojure.string :as str]
+            [clojure.tools.deps.alpha.reader :as tda-reader]
+            [clojure.tools.deps.alpha.util.dir :as tda-dir])
   (:import (java.io File)))
 
 (def ^:private clojars
@@ -29,18 +32,18 @@
         {:prefix (str prefix (inc (Integer/parseInt minor-version)))
          :suffix "-SNAPSHOT"}))))
 
+(defn ->mvn-coords [^File module-dir]
+  (symbol (name 'juxt) (.getName (.getCanonicalFile module-dir))))
+
 (def git-version
   (let [{:keys [exit out]} (shell/sh "git" "describe" "--tags" "--dirty" "--long" "--match" "*.*-*")]
     (assert (= 0 exit))
     (parse-git-version (str/trim out))))
 
-(defn ->mvn-coords [module]
-  (symbol (name 'juxt) module))
-
 (defn module-qualifier [module-dir]
   (let [deps-edn (io/file module-dir "deps.edn")]
     (when (.exists deps-edn)
-      (let [deps (read-string (slurp deps-edn))]
+      (let [deps (tda-reader/slurp-deps deps-edn)]
         (when (contains? deps :crux/module-qualifier)
           {:qualifier (:crux/module-qualifier deps)})))))
 
@@ -53,7 +56,61 @@
   (cond-> (.listFiles (io/file "."))
     :always (->> (into #{} (comp (filter #(.exists (io/file % "deps.edn")))
                                  (remove #{(io/file "./docs") (io/file "./crux-build")}))))
-    selection (->> (into #{} (filter (comp (set selection) #(.getName ^File %)))))))
+    selection (->> (into #{} (filter (comp (set selection) #(.getName (.getCanonicalFile ^File %))))))))
+
+(defn clean [module-dirs]
+  (doseq [^File module-dir module-dirs]
+    (println "-- clean" (.getName module-dir))
+    (clean/clean (str (io/file module-dir "target"))
+                 {:allow-outside-target? true})))
+
+(defn javac [module-dirs]
+  (doseq [^File module-dir module-dirs]
+    (tda-dir/with-dir module-dir
+      (println "-- javac" (.getName module-dir))
+      (javac/javac (io/file module-dir "src")
+                   {:compile-path (io/file module-dir "target/classes")
+                    :javac-options ["-source" "8" "-target" "8"
+                                    "-XDignore.symbol.file"
+                                    "-Xlint:all,-options,-path"
+                                    "-Werror"
+                                    "-proc:none"]}))))
+
+(defn jar-path [module-dir]
+  (tda-dir/canonicalize (io/file "target" (str (.getName module-dir) ".jar"))))
+
+(defn jar [module-dirs]
+  (clean module-dirs)
+  (javac module-dirs)
+  (doseq [^File module-dir module-dirs
+          :when (module-qualifier module-dir)]
+    (tda-dir/with-dir module-dir
+      (println "-- jar" (.getName module-dir))
+
+      (let [deps-edn (tda-reader/read-deps [(io/file module-dir "deps.edn")])]
+        (jar/jar (->mvn-coords module-dir) {:mvn/version (->mvn-version (:qualifier (module-qualifier module-dir)))}
+                 {:out-path (str (jar-path module-dir))
+                  :deps (-> (:deps deps-edn)
+                            (->> (into {} (map (fn [[coord {local-root :local/root :as dep}]]
+                                                 (or (when local-root
+                                                       (when-let [{:keys [qualifier]} (module-qualifier (tda-dir/canonicalize (io/file local-root)))]
+                                                         [coord {:mvn/version (->mvn-version qualifier)}]))
+                                                     [coord dep]))))))
+                  :mvn/repos {"clojars" clojars}})))))
+
+(defn deploy [module-dirs]
+  (jar module-dirs)
+
+  (doseq [^File module-dir module-dirs]
+    (tda-dir/with-dir module-dir
+      (let [coords (->mvn-coords module-dir)
+            version (->mvn-version (:qualifier (module-qualifier module-dir)))]
+        (println "-- deploy" coords version)
+
+        (let [artifacts (doto [{:file-path (jar-path module-dir) :extension "jar"}
+                               {:file-path (str (io/file module-dir "pom.xml")) :extension "pom"}]
+                          (sign/sign))]
+          (deploy/deploy coords version artifacts clojars))))))
 
 (defn sh [{:keys [dir]} & args]
   (letfn [(print-stream [stream out]
@@ -73,77 +130,12 @@
                                         :dir dir
                                         :exit exit}))))))
 
-(defn clean [module]
-  (println "-- clean" module)
-  (clean/clean "target"))
+(defn test [module-dirs]
+  (javac module-dirs)
 
-(defn javac [module]
-  (println "-- javac" module)
-  (javac/javac "src"
-               {:compile-path "target/classes"
-                :javac-options ["-source" "8" "-target" "8"
-                                "-XDignore.symbol.file"
-                                "-Xlint:all,-options,-path"
-                                "-Werror"
-                                "-proc:none"]}))
-
-(defn sub-javac [& args]
-  (doseq [^File module-dir (sub-projects args)
-          :let [module (.getName module-dir)]]
-    (sh {:dir module-dir}
-        "clojure" "-Sdeps" sdeps
-        "-m" "crux.build" "javac" module)))
-
-(defn jar-path [module]
-  (format "target/%s.jar" module))
-
-(defn jar [module]
-  (clean module)
-  (javac module)
-  (println "-- jar" module)
-
-  (jar/jar (->mvn-coords module) {:mvn/version (->mvn-version (:qualifier (module-qualifier (io/file "."))))}
-           {:out-path (jar-path module)
-            :deps (->> (:deps (read-string (slurp "deps.edn")))
-                       (into {} (map (fn [[coord {local-root :local/root :as dep}]]
-                                       (or (when local-root
-                                             (when-let [{:keys [qualifier]} (module-qualifier (io/file local-root))]
-                                               [coord {:mvn/version (->mvn-version qualifier)}]))
-                                           [coord dep])))))
-            :mvn/repos clojars}))
-
-(defn sub-jar [& args]
-  (doseq [^File module-dir (sub-projects args)
-          :when (module-qualifier module-dir)]
-    (sh {:dir module-dir}
-        "clojure" "-Sdeps" sdeps
-        "-m" "crux.build" "jar" (.getName module-dir))))
-
-(defn deploy [module]
-  (let [coords (->mvn-coords module)
-        version (->mvn-version (:qualifier (module-qualifier (io/file "."))))]
-    (println "-- deploy" coords version)
-
-    (let [artifacts (doto [{:file-path (jar-path module) :extension "jar"}
-                           {:file-path "pom.xml" :extension "pom"}]
-                      (sign/sign))]
-      (deploy/deploy coords version artifacts clojars))))
-
-(defn sub-deploy [& args]
-  (apply sub-jar args)
-
-  (doseq [^File module-dir (sub-projects args)
-          :when (module-qualifier module-dir)]
-    (sh {:dir module-dir}
-        "clojure" "-Sdeps" sdeps
-        "-m" "crux.build" "deploy" (.getName module-dir))))
-
-(defn sub-test [& args]
-  (apply sub-javac args)
-
-  (doseq [^File module-dir (sub-projects args)
+  (doseq [^File module-dir module-dirs
           :let [module (.getName module-dir)]
-          :when (-> (read-string (slurp (io/file module-dir "deps.edn")))
+          :when (-> ( (slurp (io/file module-dir "deps.edn")))
                     (get-in [:aliases :test]))]
     (println "-- test" module)
     (sh {:dir module-dir}
@@ -152,13 +144,16 @@
 (defn -main [op & args]
   (try
     (case op
-      "sub-javac" (apply sub-javac args)
-      "javac" (apply javac args)
-      "sub-jar" (apply sub-jar args)
-      "jar" (apply jar args)
-      "deploy" (apply deploy args)
-      "sub-deploy" (apply sub-deploy args)
-      "sub-test" (apply sub-test args))
+      "sub-javac" (javac (sub-projects args))
+      "javac" (javac [(io/file ".")])
+
+      "sub-jar" (jar (sub-projects args))
+      "jar" (jar [(io/file ".")])
+
+      "sub-deploy" (deploy (sub-projects args))
+      "deploy" (deploy [(io/file ".")])
+
+      "sub-test" (test (sub-projects args)))
 
     (catch Exception e
       (when-not (= "shell failed" (ex-message e))

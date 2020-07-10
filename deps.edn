@@ -2,5 +2,7 @@
  :deps {juxt/crux-core {:local/root "crux-core/"}}
 
  :aliases {:build {:extra-paths ["build"]
-                   :extra-deps {badigeon/badigeon {:mvn/version "0.0.13"}}
+                   :extra-deps {badigeon/badigeon {:git/url "https://github.com/jarohen/badigeon"
+                                                   :sha "ea641ee651b5b17de5d29e81cd6fc205d2c3febe"
+                                                   :tag "custom-deps-dir"}}
                    :main-opts ["-m" "crux.build"]}}}
